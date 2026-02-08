@@ -1,0 +1,141 @@
+/* Global Styles for Grokipedia Look */
+
+:root {
+  --font-sans: 'Inter', sans-serif;
+  --font-serif: 'Libre Baskerville', serif;
+  --font-mono: 'Fira Code', monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #0F0F0F;
+  color: #E0E0E0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography Overrides */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.text-h1,
+.text-h2,
+.text-h3,
+.text-h4,
+.text-h5,
+.text-h6 {
+  font-family: var(--font-serif) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.3 !important;
+}
+
+/* Vuetify Overrides for cleaner look */
+.v-application {
+  background: transparent !important;
+  /* Let body bg shine through */
+  font-family: var(--font-sans) !important;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background-color: #0F0F0F;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #333;
+  border-radius: 5px;
+  border: 2px solid #0F0F0F;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #555;
+}
+
+/* Markdown Content Styling */
+.markdown-body {
+  font-family: var(--font-sans);
+  line-height: 1.8;
+  font-size: 1.05rem;
+  color: #E0E0E0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: #FFFFFF;
+}
+
+.markdown-body p {
+  margin-bottom: 1.5rem;
+}
+
+.markdown-body code {
+  font-family: var(--font-mono) !important;
+  background-color: #2D2D2D !important;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+}
+
+.markdown-body pre code {
+  background-color: transparent !important;
+  padding: 0;
+}
+
+.markdown-body pre {
+  background-color: #1E1E1E !important;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+  border: 1px solid #333;
+}
+
+.markdown-body a {
+  color: #FF9800;
+  text-decoration: none;
+  border-bottom: 1px dotted #FF9800;
+}
+
+.markdown-body a:hover {
+  border-bottom: 1px solid #FF9800;
+}
+
+/* Markdown Table Styling */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  color: #e0e0e0;
+  font-size: 0.95rem;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #424242;
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background-color: #212121;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #ffffff;
+  border-bottom: 2px solid #616161;
+}
+
+.markdown-body tr:nth-child(even) {
+  background-color: #1a1a1a;
+}
+
+.markdown-body tr:hover {
+  background-color: #2c2c2c;
+}
