@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\FactCheck;
 
 class Article extends Model
 {
@@ -38,5 +39,13 @@ class Article extends Model
     public function revisionReports(): HasMany
     {
         return $this->hasMany(RevisionReport::class);
+    }
+
+    /**
+     * 記事に紐づくファクトチェック
+     */
+    public function factChecks(): HasMany
+    {
+        return $this->hasMany(FactCheck::class);
     }
 }

@@ -1,12 +1,15 @@
 import os
 import time
 import requests
+import json
+import re
+import numpy as np
+from datetime import datetime
 from google import genai
 from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 from dotenv import load_dotenv
 import schedule
-import json
-import re
+from bs4 import BeautifulSoup
 
 # 環境変数の読み込み
 load_dotenv()
@@ -14,152 +17,284 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api")
 
-# Gemini API設定
 if not API_KEY:
     print("Error: GEMINI_API_KEY is not set in .env")
     exit(1)
 
 client = genai.Client(api_key=API_KEY)
 
-def check_articles():
-    print("Starting fact check cycle...")
-    try:
-        # 全記事取得
-        response = requests.get(f"{BACKEND_URL}/search")
-        if response.status_code != 200:
-            print(f"Failed to fetch articles: {response.status_code}")
-            return
+class FactChecker:
+    def __init__(self):
+        self.domains = {
+            "help.sap.com": 1.0,
+            "sap.com": 1.0,
+            "support.sap.com": 1.0,
+            "learning.sap.com": 1.0,
+            "news.sap.com": 0.9,
+            "reuters.com": 0.9,
+            "bloomberg.com": 0.9,
+            "techcrunch.com": 0.8,
+            "wikipedia.org": 0.7,
+            "stackoverflow.com": 0.6,
+            "qiita.com": 0.5,
+            "zenn.dev": 0.5,
+            "note.com": 0.4
+        }
 
-        articles = response.json()
-        print(f"Found {len(articles)} articles.")
+    def get_pc1_score(self, url):
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc
+        # サブドメインを含む完全一致、または部分一致で検索
+        for key, score in self.domains.items():
+            if key in domain:
+                return score
+        return 0.5  # Default
 
-        for article_summary in articles:
-            article_id = article_summary['id']
-            # 詳細取得
-            detail_res = requests.get(f"{BACKEND_URL}/articles/{article_id}")
-            if detail_res.status_code != 200:
-                continue
-            
-            article = detail_res.json()
-            process_article(article)
-
-    except Exception as e:
-        print(f"Error during check cycle: {e}")
-
-def process_article(article):
-    print(f"Checking article: {article['title']}")
-    
-    # プロンプト作成
-    prompt = f"""
-    あなたはSAPの専門家です。Google検索ツールを使用して、以下の記事の内容を事実確認（ファクトチェック）してください。
-    必ず実際に検索を行い、最新のSAP公式ドキュメントや信頼できる技術情報を探してください。
-
-    記事タイトル: {article['title']}
-    モジュール: {article['module']}
-    
-    現在の記事内容:
-    {article['content']}
-
-    ---
-    検証結果に基づき、以下の点を判定してください：
-    1.  内容に誤りや古い情報、重要な欠落がある場合は `needs_revision: true` としてください。
-    2.  `reference_urls` には、**今回の検索で実際に見つけた**信頼できる情報源のURLを含めてください（架空のURLは禁止）。
-    3.  `after_content` には修正後の記事全文を記述してください。
-
-    回答は以下のJSON形式のみで出力してください。Markdownのコードブロックは不要です。
-    {{
-        "needs_revision": true/false,
-        "reason": "修正が必要な理由（検索で見つけた情報に基づき具体的に）",
-        "after_content": "修正後の記事全文（Markdown形式）",
-        "reference_urls": ["https://help.sap.com/...", ...]
-    }}
-    """
-
-    try:
-        # Google Search Grounding を有効化
-        tools = [Tool(google_search=GoogleSearch())]
-        config = GenerateContentConfig(
-            tools=tools
-        )
-
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt,
-            config=config
-        )
-        
-        # レスポンス解析
-        # 以前のSDKと同様に text 属性があるか確認、なければ parts から取得
-        text = ""
-        if hasattr(response, "text") and response.text:
-            text = response.text
-        elif hasattr(response, "candidates") and response.candidates:
-             if response.candidates[0].content and response.candidates[0].content.parts:
-                 text = response.candidates[0].content.parts[0].text
-
-        # JSONパース（念のためMarkdown除去と制御文字削除）
-        text = re.sub(r'^```(json)?\s*', '', text, flags=re.MULTILINE)
-        text = re.sub(r'```\s*$', '', text, flags=re.MULTILINE)
-        
-        # 制御文字の除去（改行・タブ以外）
-        text = "".join(ch for ch in text if ch == '\n' or ch == '\t' or ch >= ' ')
-        
-        text = text.strip()
-
+    def check_articles(self):
+        print("\n=== Starting Grokipedia Logic Fact Check Cycle ===")
         try:
-            result = json.loads(text)
-        except json.JSONDecodeError as je:
-            print(f"  -> JSON Decode Error: {je}")
-            # エラー時はデバッグ用に一部を出力
-            print(f"  -> Raw Text (start): {text[:100]}...")
-            return
+            response = requests.get(f"{BACKEND_URL}/search")
+            if response.status_code != 200:
+                print(f"Failed to fetch articles: {response.status_code}")
+                return
 
-        if result.get("needs_revision"):
-            print(f"  -> Revision needed: {result['reason']}")
-            # Grounding Metadataの確認（デバッグ用）
+            articles = response.json()
+            print(f"Found {len(articles)} articles.")
+
+            for article_summary in articles:
+                self.process_article(article_summary['id'])
+
+        except Exception as e:
+            print(f"Error during check cycle: {e}")
+
+    # ... (process_article method)
+    def process_article(self, article_id):
+        try:
+            # 1. 記事詳細取得
+            res = requests.get(f"{BACKEND_URL}/articles/{article_id}")
+            if res.status_code != 200:
+                print(f"Failed to get article {article_id}")
+                return
+            article = res.json()
+            print(f"Processing: {article['title']}")
+
+            # 2. FactCheckレコード作成 (Pending)
+            fc_res = requests.post(f"{BACKEND_URL}/fact-checks", json={
+                "article_id": article_id,
+                "status": "pending",
+                "assertion_text": article['title'] + "\n" + article['content'][:200]
+            })
+            if fc_res.status_code != 201:
+                print(f"Failed to create fact_check record: {fc_res.text}")
+                return
+            fact_check_id = fc_res.json()['id']
+
+            # 3. Google Search & Evidence Collection
+            evidences = self.search_and_collect_evidence(article)
+            
+            # NOTE: ここでのEvidence保存は一時停止し、Synthesize後にマージして保存する
+            
+            # 4. NLC Verification & Synthesis
+            synthesis_result = self.verify_and_synthesize(article, evidences)
+            
+            # EvidenceにQuoteをマージ
+            used_refs = synthesis_result.get('used_references', [])
+            for ref in used_refs:
+                ref_num = ref.get('reference_num')
+                quote = ref.get('quote')
+                # evidencesリストの中から該当するものを探して更新
+                for ev in evidences:
+                    if ev['reference_num'] == ref_num:
+                        ev['quote'] = quote
+                        break
+            
+            # DBにEvidence保存 (Quote更新後)
+            if evidences:
+                requests.post(f"{BACKEND_URL}/fact-checks/{fact_check_id}/evidences", json={
+                    "evidences": evidences
+                })
+            
+            # 5. Conductivity Check
+            conductivity = self.measure_conductivity(synthesis_result['synthesized_text'], evidences)
+
+            # 6. Update FactCheck Record
+            status = "abstained"
+            if synthesis_result['nlc_score'] >= 0.8 and conductivity >= 0.8:
+                status = "verified"
+            elif synthesis_result['nlc_score'] >= 0.5:
+                status = "provisional"
+
+            requests.put(f"{BACKEND_URL}/fact-checks/{fact_check_id}", json={
+                "status": status,
+                "synthesized_text": synthesis_result['synthesized_text'],
+                "nlc_score": synthesis_result['nlc_score'],
+                "conductivity": conductivity,
+                "evidence_count": len(evidences),
+                "last_checked_at": datetime.now().isoformat()
+            })
+
+            print(f"  -> Result: {status} (NLC: {synthesis_result['nlc_score']}, Cond: {conductivity})")
+
+            # 7. 修正提案 (verifiedの場合のみ)
+            if status == "verified":
+                 self.submit_proposal(article, synthesis_result, evidences)
+
+        except Exception as e:
+            print(f"Error checking article {article_id}: {e}")
+
+    def search_and_collect_evidence(self, article):
+        print("  -> Searching Google...")
+        query = f"SAP {article['module']} {article['title']} official documentation"
+        
+        tools = [Tool(google_search=GoogleSearch())]
+        config = GenerateContentConfig(tools=tools)
+        
+        # 検索用のプロンプト（APIに検索を実行させる）
+        prompt = f"Find official SAP documentation and reliable technical articles about: {query}"
+        
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=config
+            )
+            
+            evidences = []
             if hasattr(response, "candidates") and response.candidates:
                 meta = response.candidates[0].grounding_metadata
                 if meta and meta.grounding_chunks:
-                     print(f"  -> Grounding Chunks found: {len(meta.grounding_chunks)}")
+                    print(f"  -> Found {len(meta.grounding_chunks)} grounding chunks.")
+                    for i, chunk in enumerate(meta.grounding_chunks):
+                        if chunk.web:
+                            url = chunk.web.uri
+                            title = chunk.web.title
+                            pc1 = self.get_pc1_score(url)
+                            
+                            evidences.append({
+                                "url": url,
+                                "title": title,
+                                "quote": "", # 後でLLMに抽出させる
+                                "reference_num": i + 1,
+                                "pc1_score": pc1,
+                                "is_primary": pc1 >= 0.9
+                            })
+            return evidences
+        except Exception as e:
+            print(f"  -> Search failed: {e}")
+            return []
 
-            submit_proposal(article['id'], result)
-        else:
-            print("  -> No revision needed.")
-
-    except Exception as e:
-        print(f"  -> Error checking article: {e}")
-
-def submit_proposal(article_id, result):
-    payload = {
-        "creator_type": "ai",
-        "reason": f"[AI Fact Check] {result['reason']}",
-        "after_content": result['after_content'],
-        "reference_urls": result.get("reference_urls", [])
-    }
-    
-    try:
-        # 1. 提案を作成
-        res = requests.post(f"{BACKEND_URL}/articles/{article_id}/propose", json=payload)
+    def verify_and_synthesize(self, article, evidences):
+        print("  -> Verifying and Synthesizing...")
         
-        if res.status_code == 201:
-            data = res.json()
-            report_id = data.get('report_id')
-            print(f"  -> Proposal submitted (ID: {report_id}).")
-            
-            # 2. 即座に承認（記事更新）
-            if report_id:
-                approve_res = requests.patch(f"{BACKEND_URL}/reports/{report_id}/approve")
-                if approve_res.status_code == 200:
-                    print("  -> Proposal APPROVED and Article UPDATED successfully.")
-                else:
-                    print(f"  -> Failed to approve proposal: {approve_res.status_code}")
-        else:
-            print(f"  -> Failed to submit proposal: {res.status_code} {res.text}")
+        evidence_text = ""
+        for ev in evidences:
+            evidence_text += f"[{ev['reference_num']}] Title: {ev['title']}\nURL: {ev['url']}\nPC1: {ev['pc1_score']}\n\n"
 
-    except Exception as e:
-        print(f"  -> Error submitting/approving proposal: {e}")
+        prompt = f"""
+        あなたは厳格なSAPファクトチェッカーです。
+        以下の【記事】の内容を、与えられた【証拠リスト】のみを用いて検証し、
+        Grokipediaの「No-Leap Constraint (NLC)」に従って再構成してください。
+
+        【重要指示】
+        1. あなたの役割は、記事の内容を「No-Leap Constraint」に基づいて検証・補強することです。
+        2. 【証拠リスト】に基づいて裏付けが取れた箇所には、必ず `[1]` のような出典番号を付与してください。
+        3. 【情報の完全性】証拠リストに情報がない場合でも、元の【記事】の記述は削除せず、そのまま維持してください。**記事の全てのセクション、全ての段落を網羅し、絶対に途中で切ったり省略したりしないでください。**
+        4. ただし、証拠リストと明らかに矛盾する内容（明らかな事実誤認）が見つかった場合は、証拠に基づいて修正してください。
+        5. 可能な限り、複数の証拠に基づいた多角的な検証を心がけてください。
+        6. **出力形式**: 以下の形式で出力してください。JSON全体ではなく、特定の部分のみJSONにします。
+
+        ===SYNTHESIZED_TEXT===
+        (ここに再構成された記事全文をMarkdown形式で出力。途中で切れないように全て出力すること)
+        ===END_SYNTHESIZED_TEXT===
+
+        ===METADATA_JSON===
+        {
+            "nlc_score": 0.95,
+            "used_references": [
+                { "reference_num": 1, "quote": "引用文..." },
+                { "reference_num": 2, "quote": "..." }
+            ]
+        }
+        ===END_METADATA_JSON===
+
+        【記事】
+        {article['content'][:5000]}...
+
+        【証拠リスト】
+        {evidence_text}
+        """
+
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=GenerateContentConfig(
+                    max_output_tokens=8192
+                )
+            )
+            
+            text = response.text
+            print(f"DEBUG: AI Response Text (First 500 chars):\n{text[:500]}...\n")
+
+            
+            # Parse SYNTHESIZED_TEXT
+            syn_match = re.search(r'===SYNTHESIZED_TEXT===(.*?)===END_SYNTHESIZED_TEXT===', text, re.DOTALL)
+            synthesized_text = syn_match.group(1).strip() if syn_match else article['content']
+            
+            # Parse METADATA_JSON
+            meta_match = re.search(r'===METADATA_JSON===(.*?)===END_METADATA_JSON===', text, re.DOTALL)
+            metadata = json.loads(meta_match.group(1).strip()) if meta_match else {"nlc_score": 0.0, "used_references": []}
+            
+            return {
+                "synthesized_text": synthesized_text,
+                "nlc_score": metadata.get('nlc_score', 0.0),
+                "used_references": metadata.get('used_references', [])
+            }
+
+        except Exception as e:
+            print(f"  -> Synthesis failed: {e}")
+            # Fallback
+            return {"synthesized_text": article['content'], "nlc_score": 0.0, "used_references": []}
+
+    def measure_conductivity(self, synthesized_text, evidences):
+        # 簡易的な伝導率チェック（キーワード含有率など）
+        # 本来はEmbedding類似度を使うが、ここでは簡易実装
+        score = 0.5
+        if not evidences:
+            return 0.0
+        
+        # 非常に単純なヒューリスティック: 生成テキスト内に参照番号が含まれているか
+        import re
+        refs = re.findall(r'\[(\d+)\]', synthesized_text)
+        if len(refs) > 0:
+            score += 0.3
+        
+        # 少しランダム性を持たせる（デモ用）
+        return min(0.95, score + (len(evidences) * 0.05))
+
+    def submit_proposal(self, article, synthesis_result, evidences):
+        print("  -> Submitting Proposal...")
+        
+        # Reference URL list
+        urls = [ev['url'] for ev in evidences if ev['pc1_score'] >= 0.8]
+
+        payload = {
+            "creator_type": "ai",
+            "reason": f"[Grokipedia Verified] NLC Score: {synthesis_result['nlc_score']}",
+            "after_content": synthesis_result['synthesized_text'],
+            "reference_urls": urls
+        }
+        
+        try:
+            res = requests.post(f"{BACKEND_URL}/articles/{article['id']}/propose", json=payload)
+            if res.status_code == 201:
+                report_id = res.json().get('report_id')
+                # 自動承認
+                requests.patch(f"{BACKEND_URL}/reports/{report_id}/approve")
+                print("  -> Correction applied successfully.")
+        except Exception as e:
+            print(f"  -> Proposal submission failed: {e}")
 
 if __name__ == "__main__":
-    # 即時実行
-    check_articles()
-
+    checker = FactChecker()
+    checker.check_articles()

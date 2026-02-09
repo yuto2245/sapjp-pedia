@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\ArticleController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\FactCheckController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +38,13 @@ Route::post('/articles', [ArticleController::class, 'store']);
 Route::get('/reports/pending', [ReportController::class, 'pending']);
 Route::patch('/reports/{id}/approve', [ReportController::class, 'approve']);
 Route::patch('/reports/{id}/reject', [ReportController::class, 'reject']);
+
+// ファクトチェック (AIエージェント用)
+Route::prefix('fact-checks')->group(function () {
+    Route::post('/', [FactCheckController::class, 'store']);
+    Route::put('/{id}', [FactCheckController::class, 'update']);
+    Route::post('/{id}/evidences', [FactCheckController::class, 'storeEvidences']);
+});
 
 // ========================================
 // 認証済みユーザーのみ（管理者用）

@@ -21,8 +21,8 @@ class ArticleController extends Controller
         $articles = Article::query()
             ->when($query, function ($q) use ($query) {
                 $q->where('title', 'like', "%{$query}%")
-                  ->orWhere('module', 'like', "%{$query}%")
-                  ->orWhere('content', 'like', "%{$query}%");
+                    ->orWhere('module', 'like', "%{$query}%")
+                    ->orWhere('content', 'like', "%{$query}%");
             })
             ->where('status', 'published')
             ->select('id', 'title', 'module', 'last_verified_at')
@@ -38,7 +38,13 @@ class ArticleController extends Controller
      */
     public function show(string $id): JsonResponse
     {
-        $article = Article::with('references')->findOrFail($id);
+        $article = Article::with(['references', 'factChecks.evidences'])->findOrFail($id);
+
+        // 最新の検証済みのFactCheckを取得
+        $latestFactCheck = $article->factChecks
+            ->where('status', 'verified')
+            ->sortByDesc('created_at')
+            ->first();
 
         return response()->json([
             'id' => $article->id,
@@ -53,6 +59,20 @@ class ArticleController extends Controller
                 'title' => $ref->title,
                 'url' => $ref->url,
             ]),
+            'fact_check' => $latestFactCheck ? [
+                'id' => $latestFactCheck->id,
+                'status' => $latestFactCheck->status,
+                'synthesized_text' => $latestFactCheck->synthesized_text,
+                'nlc_score' => $latestFactCheck->nlc_score,
+                'conductivity' => $latestFactCheck->conductivity,
+                'evidences' => $latestFactCheck->evidences->map(fn($ev) => [
+                    'reference_num' => $ev->reference_num,
+                    'url' => $ev->url,
+                    'title' => $ev->title,
+                    'quote' => $ev->quote,
+                    'is_primary' => $ev->is_primary,
+                ]),
+            ] : null,
         ]);
     }
 

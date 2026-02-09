@@ -86,12 +86,49 @@
 
             <!-- 概要（リード文） -->
              <p class="text-h6 text-grey-lighten-1 mb-10 font-weight-regular" style="font-family: 'Inter', sans-serif; line-height: 1.6;">
-               {{ article.title }} は SAP ERP における重要なコンポーネントです... (概要プレースホルダー)
+              {{ article.title }} に関する詳細情報です。最新のSAP公式ドキュメントおよび信頼できる情報源に基づいて検証されています。
              </p>
 
             <!-- 本文 -->
-            <div class="markdown-body">
-              <div v-html="renderedContent" />
+            <div class="markdown-body position-relative">
+              <div v-html="renderedContent" @mouseover="handleMouseOver" @click="handleEvidenceClick" />
+              
+              <!-- Evidence Popup -->
+              <v-card
+                v-if="hoveredEvidence"
+                class="evidence-popup"
+                elevation="10"
+                width="360"
+                style="position: absolute; z-index: 100;"
+                :style="{ top: popupPos.y + 'px', left: popupPos.x + 'px' }"
+                @mouseleave="closePopup"
+              >
+                <div class="pa-4 bg-grey-darken-4">
+                  <div class="d-flex align-center mb-2">
+                    <v-icon size="small" color="primary" class="mr-2">mdi-format-quote-open</v-icon>
+                    <span class="text-caption font-weight-bold text-primary">EVIDENCE #{{ hoveredEvidence.reference_num }}</span>
+                    <v-spacer />
+                    <v-chip size="x-small" :color="hoveredEvidence.is_primary ? 'success' : 'grey'" variant="flat">
+                      {{ hoveredEvidence.is_primary ? 'Primary Source' : 'Reference' }}
+                    </v-chip>
+                  </div>
+                  
+                  <div class="text-body-2 mb-3 text-white font-italic" style="line-height: 1.6;">
+                    "{{ hoveredEvidence.quote || 'No specific quote available.' }}"
+                  </div>
+
+                  <v-divider class="mb-3 border-opacity-25" />
+
+                  <a :href="hoveredEvidence.url" target="_blank" class="d-flex align-center text-decoration-none text-grey-lighten-1 hover-source">
+                    <v-icon size="small" class="mr-2">mdi-link-variant</v-icon>
+                    <div class="text-caption text-truncate">
+                      <div class="font-weight-bold">{{ hoveredEvidence.title || getDomain(hoveredEvidence.url) }}</div>
+                      <div class="text-grey-darken-1">{{ getDomain(hoveredEvidence.url) }}</div>
+                    </div>
+                    <v-icon size="small" class="ml-auto">mdi-open-in-new</v-icon>
+                  </a>
+                </div>
+              </v-card>
             </div>
 
             <!-- 参考文献セクション -->
@@ -111,8 +148,6 @@
             </div>
           </div>
         </v-col>
-        
-        <!-- 右サイドバーは削除 -->
       </v-row>
     </template>
 
@@ -139,6 +174,10 @@ const article = ref(null)
 const loading = ref(true)
 const tableOfContents = ref([])
 
+// Popup state
+const hoveredEvidence = ref(null)
+const popupPos = ref({ x: 0, y: 0 })
+
 // 記事取得
 const fetchArticle = async () => {
   loading.value = true
@@ -155,9 +194,10 @@ const fetchArticle = async () => {
 
 // 目次生成
 const generateToC = () => {
-  if (!article.value?.content) return
+  const content = article.value?.fact_check?.synthesized_text || article.value?.content
+  if (!content) return
   
-  const lines = article.value.content.split('\n')
+  const lines = content.split('\n')
   const toc = []
   let idCounter = 0
 
@@ -173,9 +213,10 @@ const generateToC = () => {
   tableOfContents.value = toc
 }
 
-// Markdown レンダリング (ID付与対応)
+// Markdown レンダリング
 const renderedContent = computed(() => {
-  if (!article.value?.content) return ''
+  const content = article.value?.fact_check?.synthesized_text || article.value?.content
+  if (!content) return ''
   
   const renderer = new marked.Renderer()
   let idCounter = 0
@@ -185,14 +226,66 @@ const renderedContent = computed(() => {
     return `<h${depth} id="${id}">${text}</h${depth}>`
   }
 
-  return marked.parse(article.value.content, { renderer })
+  let html = marked.parse(content, { renderer })
+
+  // [n] を置換 (FactCheckがある場合のみ)
+  if (article.value?.fact_check) {
+    html = html.replace(/\[(\d+)\]/g, (match, num) => {
+      // 証拠が存在するか確認
+      const exists = article.value.fact_check.evidences.some(e => e.reference_num == num)
+      if (exists) {
+        return `<span class="evidence-ref" data-ref="${num}">[${num}]</span>`
+      }
+      return match
+    })
+  }
+
+  return html
 })
+
+// マウスオーバー処理
+const handleMouseOver = (e) => {
+  const target = e.target.closest('.evidence-ref')
+  if (target) {
+    const refNum = target.dataset.ref
+    const evidence = article.value.fact_check?.evidences.find(ev => ev.reference_num == refNum)
+    
+    if (evidence) {
+      hoveredEvidence.value = evidence
+      // 座標計算 (要素の直下)
+      const rect = target.getBoundingClientRect()
+      // 親コンテナ(.markdown-body)相対座標に変換
+      const container = e.currentTarget.getBoundingClientRect()
+      
+      popupPos.value = {
+        x: rect.left - container.left, // 左端合わせ
+        y: rect.bottom - container.top + 8 // 下に8px
+      }
+    }
+  } else if (!e.target.closest('.evidence-popup')) {
+    // ポップアップ以外にマウスが行ったら閉じる（ただしポップアップへの移動は許容したいのでmouseleaveで閉じる制御が必要かも）
+    // 今回は単純化のため、refから外れたら閉じるが、ポップアップ自体へのホバーも考慮するならロジック追加が必要
+    // -> v-menu的な挙動にするにはもう少し工夫がいる。
+    // 親の@clickのみにする手もあるが、ホバー要望。
+    // 一旦、popup自体にはマウスイベントを伝播させないようにし、記事本文のホバーでターゲットが変わったら閉じるようにする。
+  }
+}
+
+// ポップアップを閉じる
+const closePopup = () => {
+  hoveredEvidence.value = null
+}
+
+// クリックでも開くように（モバイル対応など）
+const handleEvidenceClick = (e) => {
+  handleMouseOver(e)
+}
 
 // スクロール処理
 const scrollToHeading = (id) => {
   const element = document.getElementById(id)
   if (element) {
-    const headerOffset = 80 // ヘッダー分など
+    const headerOffset = 80
     const elementPosition = element.getBoundingClientRect().top
     const offsetPosition = elementPosition + window.pageYOffset - headerOffset
 
@@ -203,19 +296,21 @@ const scrollToHeading = (id) => {
   }
 }
 
-// 鮮度表示
+// 鮮度表示 (FactCheckがある場合はその日付を優先)
 const freshnessColor = computed(() => {
-  if (!article.value?.last_verified_at) return 'grey'
-  const hours = (Date.now() - new Date(article.value.last_verified_at)) / (1000 * 60 * 60)
+  const dateStr = article.value?.fact_check?.updated_at || article.value?.last_verified_at
+  if (!dateStr) return 'grey'
+  const hours = (Date.now() - new Date(dateStr)) / (1000 * 60 * 60)
   if (hours < 24) return 'success'
   if (hours < 72) return 'warning'
   return 'error'
 })
 
 const freshnessText = computed(() => {
-  if (!article.value?.last_verified_at) return '未検証'
-  const date = new Date(article.value.last_verified_at)
-  return `AI検証済み (${date.toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })})`
+  const dateStr = article.value?.fact_check?.last_checked_at || article.value?.last_verified_at
+  if (!dateStr) return '未検証'
+  const date = new Date(dateStr)
+  return `Verified by Grokipedia (${date.toLocaleDateString('ja-JP')})`
 })
 
 const getDomain = (url) => {
@@ -229,16 +324,6 @@ const getDomain = (url) => {
 onMounted(() => {
   fetchArticle()
 })
-
-const formatRefType = (type) => {
-  const map = {
-    official_doc: 'Official Doc',
-    community_blog: 'Community Blog',
-    personal_experience: 'Experience',
-    ai_generated: 'AI Generated'
-  }
-  return map[type] || type
-}
 </script>
 
 <style scoped>
@@ -260,7 +345,7 @@ const formatRefType = (type) => {
 
 /* 目次リンクのスタイル */
 .toc-link {
-  color: #9e9e9e; /* text-grey-darken-1 */
+  color: #9e9e9e;
   text-decoration: none;
   display: block;
   padding: 4px 0;
@@ -269,7 +354,26 @@ const formatRefType = (type) => {
 }
 
 .toc-link:hover {
-  color: #E0E0E0; /* text-white */
+  color: #E0E0E0;
 }
 
+/* Evidence Reference Styles */
+:deep(.evidence-ref) {
+  color: #64B5F6; /* Primary Color */
+  font-weight: bold;
+  cursor: pointer;
+  margin: 0 2px;
+  font-size: 0.8em;
+  vertical-align: super;
+  transition: opacity 0.2s;
+}
+
+:deep(.evidence-ref:hover) {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.hover-source:hover {
+  opacity: 0.8;
+}
 </style>

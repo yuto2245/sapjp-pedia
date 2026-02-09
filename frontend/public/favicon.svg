@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#000000" />
+      <stop offset="60%" stop-color="#222222" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+    <style>
+      @keyframes spin { 
+        from { transform: rotate(0deg); } 
+        to { transform: rotate(360deg); } 
+      }
+      .disk { 
+        transform-origin: center; 
+        animation: spin 60s linear infinite; 
+      }
+    </style>
+  </defs>
+
+  <!-- 背景 (黒い宇宙) -->
+  <circle cx="32" cy="32" r="30" fill="#121212" />
+
+  <!-- 降着円盤 (ブロックノイズでAA感を表現) -->
+  <g class="disk" opacity="0.8">
+    <!-- 外周の輝き -->
+    <circle cx="32" cy="32" r="24" fill="url(#glow)" opacity="0.6" />
+    
+    <!-- ランダムなドット/ブロック (グレー) -->
+    <rect x="28" y="4" width="8" height="4" fill="#666" />
+    <rect x="4" y="28" width="4" height="8" fill="#666" />
+    <rect x="28" y="56" width="8" height="4" fill="#666" />
+    <rect x="56" y="28" width="4" height="8" fill="#666" />
+
+    <rect x="14" y="14" width="6" height="6" fill="#888" />
+    <rect x="44" y="14" width="6" height="6" fill="#888" />
+    <rect x="14" y="44" width="6" height="6" fill="#888" />
+    <rect x="44" y="44" width="6" height="6" fill="#888" />
+
+    <rect x="30" y="10" width="4" height="12" fill="#aaa" />
+    <rect x="10" y="30" width="12" height="4" fill="#aaa" />
+    <rect x="30" y="42" width="4" height="12" fill="#aaa" />
+    <rect x="42" y="30" width="12" height="4" fill="#aaa" />
+  </g>
+
+  <!-- イベントホライズン (中心の完全な黒) -->
+  <circle cx="32" cy="32" r="10" fill="#000000" stroke="#444" stroke-width="1" opacity="0.9" />
+</svg>
