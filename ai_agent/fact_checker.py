@@ -142,6 +142,24 @@ class FactChecker:
         except Exception as e:
             print(f"Error checking article {article_id}: {e}")
 
+    def fetch_page_content(self, url):
+        """URLからページ内容を取得し、テキストを抽出する"""
+        try:
+            response = requests.get(url, timeout=10, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; SAPJPpedia-FactChecker/1.0)"
+            })
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for tag in soup(['script', 'style', 'nav', 'footer']):
+                tag.decompose()
+            text = soup.get_text(separator='\n', strip=True)
+            text = text[:3000]
+            print(f"  -> Fetched {len(text)} chars from {url}")
+            return text
+        except Exception as e:
+            print(f"  -> Failed to fetch {url}: {e}")
+            return ""
+
     def search_and_collect_evidence(self, article):
         print("  -> Searching Google...")
         query = f"SAP {article['module']} {article['title']} official documentation"
@@ -168,13 +186,18 @@ class FactChecker:
                         if chunk.web:
                             url = chunk.web.uri
                             title = chunk.web.title
+                            snippet = self.fetch_page_content(url)
+                            if not snippet:
+                                print(f"  -> Skipping {url} (no content fetched)")
+                                continue
                             pc1 = self.get_pc1_score(url)
-                            
+
                             evidences.append({
                                 "url": url,
                                 "title": title,
+                                "snippet": snippet,
                                 "quote": "", # 後でLLMに抽出させる
-                                "reference_num": i + 1,
+                                "reference_num": len(evidences) + 1,
                                 "pc1_score": pc1,
                                 "is_primary": pc1 >= 0.9
                             })
@@ -188,7 +211,8 @@ class FactChecker:
         
         evidence_text = ""
         for ev in evidences:
-            evidence_text += f"[{ev['reference_num']}] Title: {ev['title']}\nURL: {ev['url']}\nPC1: {ev['pc1_score']}\n\n"
+            snippet = ev.get('snippet', '')
+            evidence_text += f"[{ev['reference_num']}] Title: {ev['title']}\nURL: {ev['url']}\nPC1: {ev['pc1_score']}\nContent:\n{snippet}\n\n"
 
         prompt = f"""
         あなたは厳格なSAPファクトチェッカーです。
@@ -197,11 +221,12 @@ class FactChecker:
 
         【重要指示】
         1. あなたの役割は、記事の内容を「No-Leap Constraint」に基づいて検証・補強することです。
-        2. 【証拠リスト】に基づいて裏付けが取れた箇所には、必ず `[1]` のような出典番号を付与してください。
-        3. 【情報の完全性】証拠リストに情報がない場合でも、元の【記事】の記述は削除せず、そのまま維持してください。**記事の全てのセクション、全ての段落を網羅し、絶対に途中で切ったり省略したりしないでください。**
-        4. ただし、証拠リストと明らかに矛盾する内容（明らかな事実誤認）が見つかった場合は、証拠に基づいて修正してください。
-        5. 可能な限り、複数の証拠に基づいた多角的な検証を心がけてください。
-        6. **出力形式**: 以下の形式で出力してください。JSON全体ではなく、特定の部分のみJSONにします。
+        2. 各証拠にはソースページから取得した実際のテキスト内容（Content）が含まれています。**検証は必ずこのContentに書かれている情報のみに基づいて行ってください。あなた自身の訓練データや事前知識を根拠にしてはいけません。**
+        3. 【証拠リスト】のContentに基づいて裏付けが取れた箇所には、必ず `[1]` のような出典番号を付与してください。quoteにはContentから該当する記述を正確に引用してください。
+        4. 【情報の完全性】証拠リストのContentに該当する情報がない場合でも、元の【記事】の記述は削除せず、そのまま維持してください。**記事の全てのセクション、全ての段落を網羅し、絶対に途中で切ったり省略したりしないでください。**
+        5. ただし、証拠リストのContentと明らかに矛盾する内容（明らかな事実誤認）が見つかった場合は、証拠に基づいて修正してください。
+        6. 可能な限り、複数の証拠のContentに基づいた多角的な検証を心がけてください。
+        7. **出力形式**: 以下の形式で出力してください。JSON全体ではなく、特定の部分のみJSONにします。
 
         ===SYNTHESIZED_TEXT===
         (ここに再構成された記事全文をMarkdown形式で出力。途中で切れないように全て出力すること)
