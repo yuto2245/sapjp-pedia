@@ -1,20 +1,20 @@
-# Grokipedia Cross-Check Algorithm v1.0
+# Grokipedia Cross-Check Algorithm v2.0
 
 ## 1. 概要
 本ドキュメントは、SAPJP-pediaにおける情報の信頼性を担保するためのクロスチェックアルゴリズム「Grokipedia Logic」の設計仕様書です。
-単なるWEB検索の順位付けではなく、**数理モデルに基づいた「接地 (Grounding)」の強制**と、情報の**「第一原理」的な階層化**によって、ハルシネーション（幻覚）を排除し、統計的真実を導き出すことを目的とします。
+RAG (Retrieval-Augmented Generation) における "Response Grounding" と NLI-based Verification に基づき、ハルシネーション（幻覚）を排除し、統計的真実を導き出すことを目的とします。
 
 ## 2. アルゴリズムの主要コンポーネント
 
 ### 2.1. No-Leap Constraint (NLC: 跳躍禁止制約)
-AIが生成するすべての主張（Assertion）に対し、取得したコンテキスト内に十分な証拠が存在することを数学的に要求する制約です。
+AIが生成するすべての主張（Assertion）に対し、取得したコンテキスト内に十分な証拠が存在することを要求する制約です。
 
 *   **判定式**: $\Gamma(a,c) \ge \tau$
     *   $a$: 主張 (Assertion)
     *   $c$: コンテキスト (Context / Evidence)
-    *   $\Gamma$: スコアリング関数 (Entailment + Relevance)
-    *   $\tau$: 信頼性閾値 (デフォルト: 0.95)
-*   **動作**: この条件を満たさない場合、AIは回答を生成せず「Abstain (棄権)」または「要検証」ステータスを返します。
+    *   $\Gamma$: NLIスコアリング関数 (Entailment確率)
+    *   $\tau$: 信頼性閾値（5段階分類で段階的に判定）
+*   **動作**: スコアに応じて5段階（verified / likely_correct / uncertain / likely_incorrect / refuted）に分類します。
 
 ### 2.2. Domain Reliability Score (PC1: ドメイン信頼性スコア)
 「専門家の知恵 (Wisdom of Experts)」に基づくアンサンブル格付けを採用し、情報のソースを定量評価します。
@@ -25,26 +25,29 @@ AIが生成するすべての主張（Assertion）に対し、取得したコン
     *   **Medium Quality (0.84 - 0.40)**: 専門ブログ、コミュニティフォーラム
     *   **Low Quality (0.39 - 0.00)**: 個人ブログ、掲示板、出所不明サイト
 
-### 2.3. Semantic Physics (意味物理学)
-情報の「重み」と「流れ」を物理学的指標で測定し、システムの健全性を監視します。
+### 2.3. NLI-based Scoring (P2実装済み)
+mDeBERTa-v3-base-xnli-multilingual-nli-2mil7 モデルを使用し、合成テキストと証拠チャンクの間の entailment / neutral / contradiction を判定します。
 
-*   **伝導率 ($\sigma$)**: 外部エビデンスがどの程度正確に出力に反映されたかを示す指標。($\sigma \approx 0.95$ を目標)
-*   **ディグニティ ($D$)**: 外部からの誘導的プロンプトやバイアスに対するシステムの自律性・耐性。
+*   **文レベル分割 (SummaC方式)**: 合成テキストを文に分割し、各文に対して最も高い entailment スコアを持つ証拠チャンクを特定
+*   **矛盾検出**: contradiction > 0.7 の場合、矛盾フラグを立てる
+*   **最終スコア**: 全文のweighted_scoreの平均値 × citation coverage penalty
 
-### 2.4. Statistical Truth (統計的真実)
-対立する情報が存在する場合、複数の視点をその証拠の強さに応じて統合します。
+### 2.4. 5段階判定 (多段階分類)
+NLCスコアに基づき、以下の5段階で判定します（学術文献の推奨に基づく設計）。
 
-1.  **概念抽出**: オープンソースデータからコア概念を抽出。
-2.  **偏向測定**: 反対の立場と比較し、バイアスを測定。
-3.  **バランス生成**: 「物語の確率的バランス」に基づきテキストを生成。
+| スコア範囲 | ステータス | 説明 |
+|-----------|-----------|------|
+| 0.85 - 1.00 | **verified** | 高信頼度で検証済み |
+| 0.70 - 0.84 | **likely_correct** | おそらく正確 |
+| 0.50 - 0.69 | **uncertain** | 不確実（人間レビュー推奨） |
+| 0.30 - 0.49 | **likely_incorrect** | おそらく不正確（警告フラグ） |
+| 0.00 - 0.29 | **refuted** | 高信頼度で否定 |
 
 ---
 
-## 3. データベース設計 (Schema Update v1.1)
+## 3. データベース設計 (Schema v1.1)
 
-ユーザー要件「複数ソースに基づく回答生成」と「UIでの根拠表示（マウスオーバー・リンク）」に対応するため、スキーマを詳細化しました。
-
-### 3.1. `domain_ratings` テーブル (新規)
+### 3.1. `domain_ratings` テーブル
 ドメインごとのPC1スコアを管理するマスタテーブル。
 
 | Column | Type | Description |
@@ -54,21 +57,21 @@ AIが生成するすべての主張（Assertion）に対し、取得したコン
 | `pc1_score` | DECIMAL(5,4) | PC1スコア (0.0000 - 1.0000) |
 | `category` | VARCHAR | カテゴリ (Official, News, Blog) |
 
-### 3.2. `fact_checks` テーブル (拡張)
+### 3.2. `fact_checks` テーブル
 記事の検証結果と、**生成された統合回答**を保存します。
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | BIGINT | PK |
 | `article_id` | BIGINT | FK (Articles) |
-| `status` | VARCHAR | `verified`, `provisional`, `abstained` |
+| `status` | VARCHAR | `verified`, `likely_correct`, `uncertain`, `likely_incorrect`, `refuted` |
 | `assertion_text` | TEXT | 検証対象となった主張（AI抽出） |
 | `synthesized_text` | TEXT | **統合された回答文** (例: "...と言われています[1]。一方...[2]") |
 | `nlc_score` | DECIMAL(5,4) | NLC判定スコア |
-| `conductivity` | DECIMAL(5,4) | 伝導率 ($\sigma$) |
+| `evidence_count` | INT | 使用した証拠の件数 |
 | `last_checked_at` | TIMESTAMP | 最終検証日時 |
 
-### 3.3. `evidences` テーブル (新規)
+### 3.3. `evidences` テーブル
 回答の根拠となった具体的なソース情報。**UI表示用の引用文と参照番号**を持ちます。
 
 | Column | Type | Description |
@@ -79,54 +82,74 @@ AIが生成するすべての主張（Assertion）に対し、取得したコン
 | `url` | VARCHAR | ソースURL (クリック遷移先) |
 | `title` | VARCHAR | ページタイトル |
 | `quote` | TEXT | **引用文** (マウスオーバーで表示) |
-| `snippet` | TEXT | 検索スニペット (AI解析用) |
+| `snippet` | TEXT | 取得したページ内容 (NLI解析用, 最大3000文字) |
 | `pc1_score` | DECIMAL(5,4) | その時点でのPC1スコア |
 | `is_primary` | BOOLEAN | 一次情報フラグ |
 
-### 3.4. `evidence_chain` テーブル (オプション)
-思考プロセスログ（変更なし）。
-
 ---
 
-## 4. ロジック変更詳細
+## 4. ファクトチェックパイプライン
 
-### 4.1. 複数ソースに基づく「統計的真実」の生成フロー
+### 4.1. Collect All & Score Once 方式（現在のアーキテクチャ）
 
-1.  **検索 & 重み付け**:
-    *   クエリに関連する上位サイトを検索し、PC1スコアで重み付けして信頼できるソース（`Primary`, `Medium`）を選定。
-2.  **情報抽出 & NLC判定**:
-    *   各ソースから主張に関連する箇所を抽出 (`snippet`/`quote`)。
-    *   NLC ($\Gamma \ge 0.95$) をパスしたものだけを「有効なエビデンス」として採用。
-3.  **統合テキスト生成**:
-    *   有効なエビデンスを複数組み合わせ、AIに「統合回答 (`synthesized_text`)」を生成させる。
-    *   プロンプト指示: *"対立する意見がある場合は両論併記し、文末に対応するエビデンス番号 `[n]` を付与すること。"*
-4.  **データ保存**:
-    *   生成されたテキストを `fact_checks.synthesized_text` に保存。
-    *   使用したソース情報を `evidences` テーブルに保存し、`reference_num` でテキスト内の番号と紐付ける。
+```
+入力: 記事テキスト
+    │
+    ▼
+【1. クエリ生成】Gemini APIで3-5個の検索クエリを生成
+    │
+    ▼
+【2. Multi-Path Evidence Collection】
+    │  各クエリでGemini Grounding APIを呼び出し
+    │  重複URLを除外しつつ証拠を収集
+    │  PC1スコア上位15件に制限
+    │
+    ▼
+【3. ページ内容取得】
+    │  各URLに対してHTTPリクエスト + BeautifulSoupでテキスト抽出
+    │  script/style/nav/footer除去、最大3000文字
+    │
+    ▼
+【4. 一括検証＆合成】
+    │  全証拠をGemini APIに送り、記事の検証・再構成を行う
+    │  引用文（quote）を含むMETADATA_JSONを出力
+    │
+    ▼
+【5. NLIスコアリング】
+    │  mDeBERTa NLIモデルで合成テキスト vs 証拠チャンクを比較
+    │  文レベル分割 → 各文の最大entailmentスコア → 平均
+    │
+    ▼
+【6. 結果保存】
+    │  fact_checks, evidences テーブルに保存
+    │  verifiedの場合のみ修正提案を送信
+    │
+    ▼
+出力: ステータス (5段階), NLCスコア, 合成テキスト, 証拠リスト
+```
 
 ### 4.2. UI表示の仕組み
 *   フロントエンドでは `synthesized_text` を解析し、`[1]`, `[2]` などの文字列を検出。
 *   対応する `evidences` レコードの `quote` をツールチップで表示し、クリックで `url` へ遷移するリンクに置換する。
 
-### 4.4. Format Refinement (Markdown整形 & 構造化)
-ユーザー要望により、生成されたテキストの形式不備（不正なMarkdown、改行ミス等）を修正するプロセスを追加します。
-*   **目的**: 読みやすさの担保と、フロントエンドでの表示崩れ防止。
-*   **タイミング**: `synthesized_text` 生成直後（または保存後の非同期ジョブ）。
-*   **処理**:
-    *   専用の軽量LLMまたは正規表現を用いて、Markdownの文法チェックを行う。
-    *   リストのインデント、太字/斜体の閉じ忘れ、見出しレベルの整合性などを自動修正する。
-    *   DBには整形後のテキストを `synthesized_text` として保存（上書き）。
+---
 
 ## 5. 根拠と参考資料
 
-
 本アーキテクチャは、**AIの信頼性 (Trustworthy AI)** と **認識論的安全性 (Epistemic Safety)** の最新の研究成果に基づいています。
 
-1.  **No-Leap Constraint**: AIハルシネーション抑制のための標準的なアプローチとして、RAG (Retrieval-Augmented Generation) における "Response Grounding" や "NLI-based Verification" が挙げられます。閾値 $\tau=0.95$ は高リスク領域（医療・法務）における標準的な設定です。
-2.  **Wisdom of Experts (PC1)**: 複数の専門家評価をPCAで統合する手法は、メディアバイアス評価やWeb信頼性工学において有効性が示されています。
-3.  **Semantic Physics**: 情報の流れを物理モデル（流体力学や熱力学）で捉える試みは、情報の伝播効率やシステムの安定性を定量化するために提案されています。
+1.  **No-Leap Constraint**: RAG における "Response Grounding" や "NLI-based Verification" が標準的アプローチ。
+2.  **Wisdom of Experts (PC1)**: 複数の専門家評価をPCAで統合する手法は、メディアバイアス評価やWeb信頼性工学において有効性が示されている。
+3.  **SummaC方式**: 文書レベルではなく文レベルでNLI比較を行うことで精度が向上（Laban et al., TACL 2022）。
+4.  **多段階分類**: FEVER (3クラス)、AVeriTeC (4クラス) 等の主要データセットの設計に準拠。
+
+詳細な学術サーベイは [nsl.md](nsl.md) を参照してください。
+
+---
 
 ## 6. 今後のロードマップ
-1.  **Phase 1**: データベース拡張とPC1スコアマスタの整備 (Current)
-2.  **Phase 2**: NLC判定ロジックの実装 (`fact_checker.py` の改修)
-3.  **Phase 3**: Semantic Physics メトリクスの計測と可視化
+1.  **Phase 1**: ✅ エビデンスAPIの中身取得 (P1完了)
+2.  **Phase 2**: ✅ NLI-based NLCスコアリング (P2完了)
+3.  **Phase 3**: 🔄 Multi-Query Evidence Collection の最適化 (進行中)
+4.  **Phase 4**: 認証修復 (P3) + 自動承認削除 (P4)
+5.  **Phase 5**: Docker化 (P6) + テスト追加 (P7)

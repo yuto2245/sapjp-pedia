@@ -10,6 +10,7 @@ from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 from dotenv import load_dotenv
 import schedule
 from bs4 import BeautifulSoup
+from nli_scorer import NLIScorer
 
 # 環境変数の読み込み
 load_dotenv()
@@ -25,6 +26,7 @@ client = genai.Client(api_key=API_KEY)
 
 class FactChecker:
     def __init__(self):
+        self.nli_scorer = NLIScorer()
         self.domains = {
             "help.sap.com": 1.0,
             "sap.com": 1.0,
@@ -67,7 +69,9 @@ class FactChecker:
         except Exception as e:
             print(f"Error during check cycle: {e}")
 
-    # ... (process_article method)
+    # ------------------------------------------------------------------
+    # Multi-Path Verification: 複数クエリで証拠を広く集め、最後に一括スコアリング
+    # ------------------------------------------------------------------
     def process_article(self, article_id):
         try:
             # 1. 記事詳細取得
@@ -89,55 +93,79 @@ class FactChecker:
                 return
             fact_check_id = fc_res.json()['id']
 
-            # 3. Google Search & Evidence Collection
-            evidences = self.search_and_collect_evidence(article)
-            
-            # NOTE: ここでのEvidence保存は一時停止し、Synthesize後にマージして保存する
-            
-            # 4. NLC Verification & Synthesis
-            synthesis_result = self.verify_and_synthesize(article, evidences)
-            
+            # 3. Multi-Path Evidence Collection
+            queries = self.generate_search_queries(article)
+            print(f"\n  === Multi-Path Evidence Collection: {len(queries)} queries ===")
+
+            all_evidences = []
+            seen_urls = set()
+
+            for path_idx, query in enumerate(queries):
+                print(f"\n  --- Query {path_idx + 1}/{len(queries)}: {query} ---")
+
+                # 個別クエリで検索
+                path_evidences = self._search_single_query(query)
+                for ev in path_evidences:
+                    if ev['url'] not in seen_urls:
+                        seen_urls.add(ev['url'])
+                        ev['reference_num'] = len(all_evidences) + 1
+                        all_evidences.append(ev)
+
+                print(f"  -> Query {path_idx + 1}: {len(path_evidences)} results, Total: {len(all_evidences)} unique")
+
+            # PC1スコアの高い順にソートし、上位15件に制限
+            all_evidences.sort(key=lambda e: e['pc1_score'], reverse=True)
+            all_evidences = all_evidences[:15]
+            for i, ev in enumerate(all_evidences):
+                ev['reference_num'] = i + 1
+
+            print(f"\n  === Evidence Collection Complete: {len(all_evidences)} evidences ===")
+
+            # 4. 一括検証＆合成（全証拠を使用）
+            synthesis_result = self.verify_and_synthesize(article, all_evidences)
+
             # EvidenceにQuoteをマージ
             used_refs = synthesis_result.get('used_references', [])
+            print(f"  -> used_references count: {len(used_refs)}")
             for ref in used_refs:
                 ref_num = ref.get('reference_num')
-                quote = ref.get('quote')
-                # evidencesリストの中から該当するものを探して更新
-                for ev in evidences:
+                quote = ref.get('quote') or ''
+                try:
+                    print(f"  -> Ref#{ref_num} quote: {quote[:80]}..." if len(quote) > 80 else f"  -> Ref#{ref_num} quote: {quote}")
+                except UnicodeEncodeError:
+                    print(f"  -> Ref#{ref_num} quote: (encoding error, {len(quote)} chars)")
+                for ev in all_evidences:
                     if ev['reference_num'] == ref_num:
                         ev['quote'] = quote
                         break
-            
-            # DBにEvidence保存 (Quote更新後)
-            if evidences:
+
+            # 5. NLI-based NLC Score（一括スコアリング）
+            nlc_result = self.nli_scorer.compute_nlc_score(
+                synthesis_result['synthesized_text'], all_evidences
+            )
+            nlc_score = nlc_result['nlc_score']
+            status = self.nli_scorer.determine_status(nlc_score)
+
+            # 6. DBにEvidence保存
+            if all_evidences:
                 requests.post(f"{BACKEND_URL}/fact-checks/{fact_check_id}/evidences", json={
-                    "evidences": evidences
+                    "evidences": all_evidences
                 })
-            
-            # 5. Conductivity Check
-            conductivity = self.measure_conductivity(synthesis_result['synthesized_text'], evidences)
 
-            # 6. Update FactCheck Record
-            status = "abstained"
-            if synthesis_result['nlc_score'] >= 0.8 and conductivity >= 0.8:
-                status = "verified"
-            elif synthesis_result['nlc_score'] >= 0.5:
-                status = "provisional"
-
+            # 7. Update FactCheck Record
             requests.put(f"{BACKEND_URL}/fact-checks/{fact_check_id}", json={
                 "status": status,
                 "synthesized_text": synthesis_result['synthesized_text'],
-                "nlc_score": synthesis_result['nlc_score'],
-                "conductivity": conductivity,
-                "evidence_count": len(evidences),
+                "nlc_score": nlc_score,
+                "evidence_count": len(all_evidences),
                 "last_checked_at": datetime.now().isoformat()
             })
 
-            print(f"  -> Result: {status} (NLC: {synthesis_result['nlc_score']}, Cond: {conductivity})")
+            print(f"  -> Result: {status} (NLI Score: {nlc_score}, Contradiction: {nlc_result['has_contradiction']})")
 
-            # 7. 修正提案 (verifiedの場合のみ)
+            # 8. 修正提案 (verifiedの場合のみ)
             if status == "verified":
-                 self.submit_proposal(article, synthesis_result, evidences)
+                 self.submit_proposal(article, synthesis_result, all_evidences, nlc_score)
 
         except Exception as e:
             print(f"Error checking article {article_id}: {e}")
@@ -150,7 +178,12 @@ class FactChecker:
             })
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
-            for tag in soup(['script', 'style', 'nav', 'footer']):
+            for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'form', 'noscript']):
+                tag.decompose()
+            # Remove common boilerplate by class/id patterns
+            for tag in soup.find_all(attrs={"class": re.compile(r'(menu|sidebar|breadcrumb|cookie|banner|ad-|social|share)', re.I)}):
+                tag.decompose()
+            for tag in soup.find_all(attrs={"id": re.compile(r'(menu|sidebar|breadcrumb|cookie|banner|footer|header)', re.I)}):
                 tag.decompose()
             text = soup.get_text(separator='\n', strip=True)
             text = text[:3000]
@@ -160,23 +193,84 @@ class FactChecker:
             print(f"  -> Failed to fetch {url}: {e}")
             return ""
 
-    def search_and_collect_evidence(self, article):
-        print("  -> Searching Google...")
-        query = f"SAP {article['module']} {article['title']} official documentation"
-        
+    def generate_search_queries(self, article):
+        """LLMに記事を読ませて検証用の検索クエリを3-5個生成させる"""
+        prompt = f"""以下のSAP技術記事を検証するための検索クエリを生成してください。
+記事の各セクションの事実主張をカバーするように、3〜5個の英語検索クエリを生成してください。
+
+ルール:
+- 各クエリは記事の異なるセクション/トピックを対象にすること
+- "SAP"を含めること
+- 公式ドキュメントや技術リファレンスが見つかるようなクエリにすること
+- JSON配列のみを返すこと: ["query1", "query2", ...]
+
+【記事タイトル】{article['title']}
+【モジュール】{article['module']}
+【記事内容】
+{article['content'][:3000]}"""
+
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=GenerateContentConfig(max_output_tokens=1024)
+            )
+            text = response.text.strip()
+            # JSON配列を抽出（コードブロックで囲まれている場合も対応）
+            json_match = re.search(r'\[.*\]', text, re.DOTALL)
+            if json_match:
+                queries = json.loads(json_match.group())
+                # 3-5個に制限
+                queries = [q for q in queries if isinstance(q, str)][:5]
+                if queries:
+                    return queries
+        except Exception as e:
+            print(f"  -> Query generation failed: {e}")
+
+        # フォールバック: 従来の固定クエリ
+        return [f"SAP {article['module']} {article['title']} official documentation"]
+
+    # def search_and_collect_evidence(self, article):
+    #     """Multi-Path Verification導入により不要。process_article内で直接処理。"""
+    #     print("  -> Searching Google...")
+    #     queries = self.generate_search_queries(article)
+    #     print(f"  -> Generated {len(queries)} search queries")
+    #
+    #     all_evidences = []
+    #     seen_urls = set()
+    #
+    #     for query in queries:
+    #         print(f"  -> Searching: {query}")
+    #         new_evidences = self._search_single_query(query)
+    #         for ev in new_evidences:
+    #             if ev['url'] not in seen_urls:
+    #                 seen_urls.add(ev['url'])
+    #                 ev['reference_num'] = len(all_evidences) + 1
+    #                 all_evidences.append(ev)
+    #
+    #     # PC1スコアの高い順にソートし、上位15件に制限（合成プロンプトの肥大化を防ぐ）
+    #     all_evidences.sort(key=lambda e: e['pc1_score'], reverse=True)
+    #     all_evidences = all_evidences[:15]
+    #     # reference_numを振り直し
+    #     for i, ev in enumerate(all_evidences):
+    #         ev['reference_num'] = i + 1
+    #     print(f"  -> Total unique evidences: {len(all_evidences)}")
+    #     return all_evidences
+
+    def _search_single_query(self, query):
+        """単一クエリでGemini Grounding APIを呼び出し、evidenceリストを返す"""
         tools = [Tool(google_search=GoogleSearch())]
         config = GenerateContentConfig(tools=tools)
-        
-        # 検索用のプロンプト（APIに検索を実行させる）
+
         prompt = f"Find official SAP documentation and reliable technical articles about: {query}"
-        
+
         try:
             response = client.models.generate_content(
                 model='gemini-2.0-flash',
                 contents=prompt,
                 config=config
             )
-            
+
             evidences = []
             if hasattr(response, "candidates") and response.candidates:
                 meta = response.candidates[0].grounding_metadata
@@ -196,7 +290,7 @@ class FactChecker:
                                 "url": url,
                                 "title": title,
                                 "snippet": snippet,
-                                "quote": "", # 後でLLMに抽出させる
+                                "quote": "",
                                 "reference_num": len(evidences) + 1,
                                 "pc1_score": pc1,
                                 "is_primary": pc1 >= 0.9
@@ -233,13 +327,12 @@ class FactChecker:
         ===END_SYNTHESIZED_TEXT===
 
         ===METADATA_JSON===
-        {
-            "nlc_score": 0.95,
+        {{
             "used_references": [
-                { "reference_num": 1, "quote": "引用文..." },
-                { "reference_num": 2, "quote": "..." }
+                {{ "reference_num": 1, "quote": "引用文..." }},
+                {{ "reference_num": 2, "quote": "..." }}
             ]
-        }
+        }}
         ===END_METADATA_JSON===
 
         【記事】
@@ -259,7 +352,9 @@ class FactChecker:
             )
             
             text = response.text
-            print(f"DEBUG: AI Response Text (First 500 chars):\n{text[:500]}...\n")
+            print(f"DEBUG: AI Response length: {len(text)} chars")
+            print(f"DEBUG: Contains METADATA_JSON: {'===METADATA_JSON===' in text}")
+            print(f"DEBUG: Contains END_METADATA_JSON: {'===END_METADATA_JSON===' in text}")
 
             
             # Parse SYNTHESIZED_TEXT
@@ -268,44 +363,27 @@ class FactChecker:
             
             # Parse METADATA_JSON
             meta_match = re.search(r'===METADATA_JSON===(.*?)===END_METADATA_JSON===', text, re.DOTALL)
-            metadata = json.loads(meta_match.group(1).strip()) if meta_match else {"nlc_score": 0.0, "used_references": []}
-            
+            metadata = json.loads(meta_match.group(1).strip()) if meta_match else {"used_references": []}
+
             return {
                 "synthesized_text": synthesized_text,
-                "nlc_score": metadata.get('nlc_score', 0.0),
                 "used_references": metadata.get('used_references', [])
             }
 
         except Exception as e:
             print(f"  -> Synthesis failed: {e}")
             # Fallback
-            return {"synthesized_text": article['content'], "nlc_score": 0.0, "used_references": []}
+            return {"synthesized_text": article['content'], "used_references": []}
 
-    def measure_conductivity(self, synthesized_text, evidences):
-        # 簡易的な伝導率チェック（キーワード含有率など）
-        # 本来はEmbedding類似度を使うが、ここでは簡易実装
-        score = 0.5
-        if not evidences:
-            return 0.0
-        
-        # 非常に単純なヒューリスティック: 生成テキスト内に参照番号が含まれているか
-        import re
-        refs = re.findall(r'\[(\d+)\]', synthesized_text)
-        if len(refs) > 0:
-            score += 0.3
-        
-        # 少しランダム性を持たせる（デモ用）
-        return min(0.95, score + (len(evidences) * 0.05))
-
-    def submit_proposal(self, article, synthesis_result, evidences):
+    def submit_proposal(self, article, synthesis_result, evidences, nlc_score=0.0):
         print("  -> Submitting Proposal...")
-        
+
         # Reference URL list
         urls = [ev['url'] for ev in evidences if ev['pc1_score'] >= 0.8]
 
         payload = {
             "creator_type": "ai",
-            "reason": f"[Grokipedia Verified] NLC Score: {synthesis_result['nlc_score']}",
+            "reason": f"[Grokipedia Verified] NLI-based NLC Score: {nlc_score}",
             "after_content": synthesis_result['synthesized_text'],
             "reference_urls": urls
         }

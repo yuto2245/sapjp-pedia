@@ -19,19 +19,25 @@ SAPの知識を共有・蓄積するためのナレッジプラットフォー�
 
 ### 3. AI Agent (`/ai_agent`)
 - **Language**: Python
-- **Model**: Gemini 2.0 Flash
+- **Model**: Gemini 2.0 Flash + mDeBERTa NLI
 - **Role**: 「Grokipedia Logic」に基づく自動ファクトチェックの実行
+- **ファイル構成**:
+  - `fact_checker.py`: コアロジック（検索・合成・検証）
+  - `nli_scorer.py`: NLIスコアリング（mDeBERTa）
 - **Algorithm**:
+  - **Multi-Query Search**: 記事から複数クエリ生成→Gemini Grounding APIで証拠収集
   - **No-Leap Constraint (NLC)**: 証拠のない推論を排除
+  - **NLI-based Scoring**: mDeBERTaモデルによる外部スコアリング（5段階判定）
   - **PC1 Scoring**: ソースドメインの信頼性評価
-  - **Long-text Synthesis**: 独自見解を維持しつつ、技術的誤りのみを修正
 
 ## ドキュメント
 
-詳細な設計資料は `docs/` フォルダに格納されています。
-
-- [Grokipedia Logic 設計仕様](docs/fact_check_design.md)
-- [実装計画・変更履歴](docs/implementation_plan.md)
+| ファイル | 内容 |
+|---------|------|
+| [fact_check_design.md](docs/fact_check_design.md) | Grokipedia Logic 設計仕様 |
+| [implementation_plan.md](docs/implementation_plan.md) | システム設計書 |
+| [walkthrough.md](docs/walkthrough.md) | 実装完了レポート |
+| [nsl.md](docs/nsl.md) | 学術的先行研究サーベイ |
 
 ## セットアップ
 
@@ -52,3 +58,4 @@ SAPの知識を共有・蓄積するためのナレッジプラットフォー�
 2. `pip install -r requirements.txt`
 3. `.env` に `GEMINI_API_KEY` を設定
 4. `python fact_checker.py` で実行
+

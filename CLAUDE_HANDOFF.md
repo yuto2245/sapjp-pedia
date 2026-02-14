@@ -49,7 +49,7 @@ Claude Codeでの開発作業時に、このファイルをコンテキストと
 
 ## 3. 最重要の改善事項（優先順で）
 
-### 【P1】エビデンスの中身を取得していない（致命的） — 修正済み・未検証
+### 【P1】エビデンスの中身を取得していない（致命的） — ✅ 修正済・検証完了
 
 **現状の問題:**
 `search_and_collect_evidence`メソッドがGemini APIの`grounding_chunks`からURLとタイトルだけを取得し、ページの実際の内容を取得していない。`verify_and_synthesize`にはURLとタイトルのみが渡され、LLMは自身の訓練データの知識で「検証したフリ」をしている。
@@ -61,17 +61,12 @@ Claude Codeでの開発作業時に、このファイルをコンテキストと
 
 **修正箇所:** `ai_agent/fact_checker.py` — `fetch_page_content`（新規）、`search_and_collect_evidence`、`verify_and_synthesize`
 
-### 【P2】NLCスコアをLLM自身に自己評価させている
+### 【P2】NLCスコアをLLM自身に自己評価させている — ✅ 修正済（最適化中）
 
-**現状の問題:**
-プロンプトで「nlc_scoreを出力せよ」と指示し、LLMが自分で0.95等の数値を返している。自分の回答を自分で採点しており、客観的検証になっていない。
-
-**修正方針:**
-NLCスコアはLLMの外部で算出する。具体的には:
-- クレーム内のキーファクトがソーステキストに含まれているかのキーワードマッチ率
-- 複数ソース間の一致度
-- ソースの信頼度（PC1スコア）の加重平均
-これらを組み合わせた独自スコアリング関数を実装する。
+**現状:**
+`nli_scorer.py`にmDeBERTa-v3-base-xnli-multilingual-nli-2mil7モデルによる外部スコアリングを実装済み。
+文レベル分割 × 証拠チャンク比較 × 5段階判定。ベストスコア 0.55（日本語検索時）。
+証拠量とGemini応答品質のバランス最適化が進行中。
 
 ### 【P3】認証が無効化されている
 
@@ -90,17 +85,12 @@ NLCスコアはLLMの外部で算出する。具体的には:
 **修正方針:**
 自動承認を削除。提案は必ず「pending」状態でDBに保存し、管理ダッシュボードから人間が承認/却下する。
 
-### 【P5】設計書にLLMのハルシネーションが混入している
+### 【P5】設計書にLLMのハルシネーションが混入している — ✅ 修正済
 
-**現状の問題:**
-`docs/fact_check_design.md`に記載されている「Semantic Physics（意味物理学）」「伝導率σ」「ディグニティD」等の概念は、設計時にLLMが生成したハルシネーション（もっともらしいが実在しない概念）であり、学術的根拠がない。実装上も`measure_conductivity`は参照番号の正規表現マッチとエビデンス数による簡易計算であり、「物理モデル」とは無関係。これらの用語がドキュメントに残っていると、プロジェクトの信頼性を損なう。
-
-**修正方針:**
-1. `docs/fact_check_design.md`からSemantic Physics、伝導率σ、ディグニティD関連のセクション（2.3節）を削除
-2. `fact_checks`テーブルの`conductivity`カラムを削除または用途を再定義
-3. `fact_checker.py`の`measure_conductivity`メソッドを削除し、P2の外部スコアリングに統合
-4. 設計書全体を見直し、実装されている機能（NLC判定、PC1スコア、統合テキスト生成）のみを正確に記述する
-5. 根拠セクション（5節）の「Semantic Physics」の参考資料記述も削除
+**現状:**
+`docs/fact_check_design.md`からSemantic Physics、伝導率σ、ディグニティDを削除済み。
+現在の実装（NLI scoring, 5段階判定, Collect All方式）に合わせて設計書をv2.0に更新。
+`fact_checks`テーブルの`conductivity`カラムは`evidence_count`に置換。
 
 ### 【P6】Docker化
 
@@ -234,8 +224,9 @@ sapjp-pedia/
 │       │   ├── EditorView.vue
 │       │   └── ...
 │       └── api.js
-└── ai_agent/                  ← Python（要リファクタリング）
-    ├── fact_checker.py        ← コアロジック（全処理が1ファイルに集中）
+└── ai_agent/                  ← Python
+    ├── fact_checker.py        ← コアロジック（検索・合成・検証）
+    ├── nli_scorer.py          ← NLIスコアリング（mDeBERTa）
     └── requirements.txt
 ```
 

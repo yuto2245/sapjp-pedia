@@ -17,7 +17,7 @@ class FactCheckController extends Controller
     {
         $validated = $request->validate([
             'article_id' => 'required|exists:articles,id',
-            'status' => 'required|string',
+            'status' => 'required|string|in:pending,verified,likely_correct,uncertain,likely_incorrect,refuted,abstained',
             'assertion_text' => 'nullable|string',
         ]);
 
@@ -34,7 +34,7 @@ class FactCheckController extends Controller
         $factCheck = FactCheck::findOrFail($id);
 
         $validated = $request->validate([
-            'status' => 'sometimes|string',
+            'status' => 'sometimes|string|in:pending,verified,likely_correct,uncertain,likely_incorrect,refuted,abstained',
             'synthesized_text' => 'nullable|string',
             'nlc_score' => 'nullable|numeric',
             'conductivity' => 'nullable|numeric',

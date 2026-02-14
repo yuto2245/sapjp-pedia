@@ -1,0 +1,36 @@
+test_html_tags_stripped (__main__.TestFetchPageContent.test_html_tags_stripped)
+正常系: script/style/nav/footer タグが除去される ... ok
+test_nonexistent_url_returns_empty (__main__.TestFetchPageContent.test_nonexistent_url_returns_empty)
+異常系: 存在しないURL → 空文字列（例外で落ちない） ... ok
+test_real_url_returns_text (__main__.TestFetchPageContent.test_real_url_returns_text)
+正常系: 実在URLからテキスト取得できる ... ok
+test_timeout_returns_empty (__main__.TestFetchPageContent.test_timeout_returns_empty)
+異常系: タイムアウト → 空文字列 ... ok
+test_truncation_to_3000 (__main__.TestFetchPageContent.test_truncation_to_3000)
+正常系: 3000文字以内に切り詰められる ... ok
+test_snippet_included_in_prompt (__main__.TestVerifyAndSynthesizePrompt.test_snippet_included_in_prompt)
+evidences の snippet がプロンプトの evidence_text に含まれる ... ok
+test_verify_and_synthesize_calls_llm_with_snippet (__main__.TestVerifyAndSynthesizePrompt.test_verify_and_synthesize_calls_llm_with_snippet)
+verify_and_synthesize が実際に snippet 付きプロンプトで LLM を呼ぶことを確認 ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.497s
+
+OK
+  -> Fetched 17 chars from http://example.com
+  -> Failed to fetch https://thisdomaindoesnotexist12345.example: HTTPSConnectionPool(host='thisdomaindoesnotexist12345.example', port=443): Max retries exceeded with url: / (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x000001CE7ECE41A0>: Failed to resolve 'thisdomaindoesnotexist12345.example' ([Errno 11001] getaddrinfo failed)"))
+  -> Fetched 3000 chars from https://en.wikipedia.org/wiki/SAP_SE
+  -> Failed to fetch http://example.com: timeout
+  -> Fetched 3000 chars from http://example.com
+  -> Verifying and Synthesizing...
+DEBUG: AI Response Text (First 500 chars):
+
+===SYNTHESIZED_TEXT===
+テスト記事の内容 [1]
+===END_SYNTHESIZED_TEXT===
+
+===METADATA_JSON===
+{"nlc_score": 0.9, "used_references": [{"reference_num": 1, "quote": "test"}]}
+===END_METADATA_JSON===
+...
+

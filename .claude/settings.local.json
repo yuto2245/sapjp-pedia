@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python fact_checker.py:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(php artisan tinker:*)",
+      "Bash(php -r:*)"
+    ]
+  }
+}

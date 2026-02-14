@@ -5,3 +5,6 @@ schedule
 beautifulsoup4
 scikit-learn
 numpy
+torch --index-url https://download.pytorch.org/whl/cpu
+transformers
+sentencepiece

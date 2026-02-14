@@ -8,7 +8,7 @@ SAPJP-pediaは、SAPの知識を共有・蓄積するナレッジプラットフ
 
 - **Backend** (`/backend`): Laravel 12 (PHP 8.2+) — 記事CRUD、API提供、ファクトチェック結果保存、MySQL、Sanctum認証
 - **Frontend** (`/frontend`): Vue 3 + Vite + Vuetify + Pinia — 記事の閲覧・編集、ファクトチェック結果表示
-- **AI Agent** (`/ai_agent`): Python — Gemini 2.0 Flashベースのファクトチェックエンジン（単一ファイル: `fact_checker.py`）
+- **AI Agent** (`/ai_agent`): Python — Gemini 2.0 Flashベースのファクトチェックエンジン（`fact_checker.py` + `nli_scorer.py`）
 
 ## 開発コマンド
 
@@ -61,23 +61,25 @@ python fact_checker.py
 - `/articles/:id/history` — 修正履歴、`/articles/:id/propose` — 修正提案
 - `/admin` — 管理ダッシュボード、`/developer/api` — 開発者APIドキュメント
 
-### ファクトチェックパイプライン（コアロジック: `ai_agent/fact_checker.py`）
-1. 記事テキストからクレーム（検証可能な事実主張）を抽出し、主観的意見と分離
-2. 第1段階スクリーニング: LLMが「明らかに正しい / 要検証 / 意見」にトリアージ
-3. 第2段階: 要検証クレームのみ外部ソース（Brave Search、Wikipedia）で本格検証
-4. クロスリファレンスマトリクス: 2ソース照合 → Verified / Likely Correct / Disputed 等
-5. 修正提案をLaravel APIに送信、人間による承認が必須（Human-in-the-Loop）
+### ファクトチェックパイプライン（コアロジック: `ai_agent/fact_checker.py` + `nli_scorer.py`）
+1. 記事から3-5個の検索クエリを自動生成（Multi-Query）
+2. 各クエリでGemini Grounding APIを呼び出し、エビデンスを収集
+3. エビデンスURLの実コンテンツを取得（BeautifulSoup）
+4. 全証拠をGeminiに送り、記事の検証・再構成を行う（Collect All & Score Once）
+5. mDeBERTa NLIモデルで合成テキスト vs 証拠を比較し、NLCスコアを算出
+6. 5段階判定: verified / likely_correct / uncertain / likely_incorrect / refuted
+7. 修正提案をLaravel APIに送信、人間による承認が必須（Human-in-the-Loop）
 
 ## 既知の課題 (`CLAUDE_HANDOFF.md`より)
 
 `CLAUDE_HANDOFF.md`に詳細記載。優先順:
-- **P1**: エビデンスURLのページ内容を実際に取得していない — LLMが訓練データだけで「検証したフリ」をしている
-- **P2**: NLCスコアをLLM自身に自己評価させている（外部算出すべき）
-- **P3**: 管理者ルートの認証が開発用として無効化されている
-- **P4**: AIが自分の修正提案を自動承認している（人間の承認を待つべき）
-- **P5**: 設計書にLLMのハルシネーションが混入（「Semantic Physics」等）
-- **P6**: Docker化されていない
-- **P7**: テストがない
+- **P1**: ✅ 完了 — エビデンスURLの実コンテンツ取得を実装
+- **P2**: ✅ 完了 — mDeBERTa NLIモデルによる外部スコアリングを実装（最適化中）
+- **P3**: ❌ 管理者ルートの認証が開発用として無効化されている
+- **P4**: ❌ AIが自分の修正提案を自動承認している（人間の承認を待つべき）
+- **P5**: ✅ 完了 — 設計書からSemantic Physicsを削除
+- **P6**: ❌ Docker化されていない
+- **P7**: ❌ テストがない
 
 ## 設計原則
 
