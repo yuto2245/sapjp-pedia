@@ -9,19 +9,19 @@
     <template v-else-if="article">
       <v-row>
         <!-- 左サイドバー（目次・メタ情報） -->
-        <v-col class="d-none d-md-block" style="width: 450px; flex: 0 0 450px;">
+        <v-col class="d-none d-md-block" style="width: 400px; flex: 0 0 400px;">
           <div class="sticky-top pt-12 pl-4">
-             <div class="text-caption text-grey text-uppercase mb-4 font-weight-bold" style="letter-spacing: 1px;">
+             <div class="text-body-2 text-grey text-uppercase mb-4 font-weight-bold" style="letter-spacing: 1px;">
               目次
              </div>
              <div class="pl-2 border-l-2 border-opacity-25" style="border-color: #424242;">
-               <div v-if="tableOfContents.length === 0" class="text-caption text-grey">
+               <div v-if="tableOfContents.length === 0" class="text-body-2 text-grey">
                  見出しがありません
                </div>
                <a
                  v-for="item in tableOfContents"
                  :key="item.id"
-                 class="toc-link text-caption"
+                 class="toc-link text-body-2"
                  :style="{ paddingLeft: (item.level - 1) * 8 + 'px' }"
                  @click.prevent="scrollToHeading(item.id)"
                >
@@ -34,60 +34,45 @@
         <!-- メインコンテンツ -->
         <v-col class="flex-grow-1" style="min-width: 0;">
           <div style="max-width: 1280px; padding-right: 24px;">
-            <!-- タイトル -->
-            <h1 class="text-h2 font-weight-bold mb-4 text-white" style="font-family: 'Libre Baskerville', serif; line-height: 1.2;">
-              {{ article.title }}
-            </h1>
-
-            <!-- メタデータ＆アクションバー -->
-            <div class="d-flex flex-wrap align-center mb-10 pb-4 border-b" style="border-color: #333 !important;">
-               <!-- 左側：メタ情報 -->
-               <div class="d-flex align-center mr-auto">
-                 <v-chip size="small" variant="outlined" color="primary" class="mr-4 font-weight-bold">
-                    {{ article.module || 'General' }}
-                 </v-chip>
-                 
-                 <div class="d-flex align-center text-caption text-grey mr-6">
-                    <v-icon size="small" class="mr-1" :color="freshnessColor">mdi-check-decagram</v-icon>
-                    <span :class="`text-${freshnessColor}`">{{ freshnessText }}</span>
-                 </div>
-                 
-                 <div class="d-flex align-center text-caption text-grey">
-                    <v-icon size="small" class="mr-1">mdi-clock-outline</v-icon>
-                    <span>5 min read</span>
-                 </div>
-               </div>
-
-               <!-- 右側：アクションボタン -->
-               <div class="d-flex align-center">
+            <!-- タイトル＆アクションボタン -->
+            <div class="d-flex align-start justify-space-between mb-4">
+              <h1 class="text-h4 font-weight-bold text-white" style="font-family: 'Libre Baskerville', serif; line-height: 1.2;">
+                {{ article.title }}
+              </h1>
+              <div class="d-flex align-center ml-4" style="flex-shrink: 0;">
                  <v-btn
                    variant="text"
-                   density="comfortable"
+                   rounded="pill"
                    color="grey"
-                   class="text-capitalize mr-2"
+                   class="text-capitalize mr-3"
                    prepend-icon="mdi-history"
                    :to="`/articles/${route.params.id}/history`"
                  >
-                   History
+                   履歴
                  </v-btn>
-                 
                  <v-btn
-                   variant="outlined"
-                   density="comfortable"
-                   color="primary"
+                   variant="text"
+                   rounded="pill"
+                   color="grey"
                    class="text-capitalize"
                    prepend-icon="mdi-pencil"
                    :to="`/articles/${route.params.id}/propose`"
                  >
-                   Edit
+                   編集
                  </v-btn>
-               </div>
+              </div>
             </div>
 
-            <!-- 概要（リード文） -->
-             <p class="text-h6 text-grey-lighten-1 mb-10 font-weight-regular" style="font-family: 'Inter', sans-serif; line-height: 1.6;">
-              {{ article.title }} に関する詳細情報です。最新のSAP公式ドキュメントおよび信頼できる情報源に基づいて検証されています。
-             </p>
+            <!-- メタデータ -->
+            <div class="d-flex align-center mb-10 pb-4 border-b" style="border-color: #333 !important;">
+               <v-chip size="small" variant="outlined" color="grey" class="mr-4 font-weight-bold">
+                  {{ article.module || 'General' }}
+               </v-chip>
+               <div class="d-flex align-center text-caption text-grey">
+                  <v-icon size="small" class="mr-1" :color="freshnessColor">mdi-check-decagram</v-icon>
+                  <span :class="`text-${freshnessColor}`">{{ freshnessText }}</span>
+               </div>
+            </div>
 
             <!-- 本文 -->
             <div class="markdown-body position-relative">
@@ -324,9 +309,25 @@ const getDomain = (url) => {
 onMounted(() => {
   fetchArticle()
 })
+
+
 </script>
 
 <style scoped>
+:deep(.markdown-body h2) {
+  margin-top: 3rem;
+  margin-bottom: 1rem;
+}
+
+:deep(.markdown-body h3) {
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+:deep(.markdown-body p) {
+  margin-bottom: 1rem;
+}
+
 .sticky-top {
   position: sticky;
   top: 64px;

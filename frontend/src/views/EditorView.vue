@@ -5,7 +5,7 @@
         <!-- ヘッダー -->
         <div class="d-flex align-center mb-8">
           <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" color="grey" />
-          <div class="text-subtitle-2 text-grey ml-2 text-uppercase">新規記事</div>
+          <div class="text-subtitle-2 text-grey ml-2 text-uppercase">前画面へ</div>
           <v-spacer />
           <v-btn
             color="primary"

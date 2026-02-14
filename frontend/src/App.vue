@@ -18,26 +18,30 @@
           prepend-icon="mdi-plus"
           to="/editor"
           variant="text"
-          class="text-capitalize"
+          rounded="pill"
+          color="grey"
+          class="text-capitalize mr-3"
         >
-          New Article
+          新規記事
         </v-btn>
 
         <v-btn
           prepend-icon="mdi-shield-account"
           to="/admin"
           variant="text"
-          color="grey-lighten-1"
-          class="text-capitalize"
+          rounded="pill"
+          color="grey"
+          class="text-capitalize mr-3"
         >
-          Admin
+          管理者
         </v-btn>
 
         <v-btn
           prepend-icon="mdi-api"
           to="/developer/api"
           variant="text"
-          color="grey-lighten-1"
+          rounded="pill"
+          color="grey"
           class="text-capitalize"
         >
           API
@@ -58,7 +62,7 @@
             © 2026 SAPJP-pedia
           </p>
           <div class="text-caption text-grey">
-            Powered by Gemini 2.0 Flash & Laravel 11
+            Powered by Gemini 2.0 Flash & mDeBERTa NLI
           </div>
         </div>
       </v-container>
