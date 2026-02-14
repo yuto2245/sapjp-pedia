@@ -75,46 +75,40 @@
             </div>
 
             <!-- 本文 -->
-            <div class="markdown-body position-relative">
+            <div class="markdown-body position-relative mb-16">
               <div v-html="renderedContent" @mouseover="handleMouseOver" @click="handleEvidenceClick" />
               
-              <!-- Evidence Popup -->
+              <!-- 証拠ポップアップ -->
               <v-card
                 v-if="hoveredEvidence"
-                class="evidence-popup"
-                elevation="10"
-                width="360"
-                style="position: absolute; z-index: 100;"
-                :style="{ top: popupPos.y + 'px', left: popupPos.x + 'px' }"
+                class="evidence-popup rounded-custom"
+                elevation="8"
+                min-width="250"
+                max-width="320"
+                theme="dark"
+                :style="{ top: popupPos.y + 'px', left: popupPos.x + 'px', position: 'absolute', zIndex: 100 }"
                 @mouseleave="closePopup"
               >
-                <div class="pa-4 bg-grey-darken-4">
-                  <div class="d-flex align-center mb-2">
-                    <v-icon size="small" color="primary" class="mr-2">mdi-format-quote-open</v-icon>
-                    <span class="text-caption font-weight-bold text-primary">EVIDENCE #{{ hoveredEvidence.reference_num }}</span>
-                    <v-spacer />
-                    <v-chip size="x-small" :color="hoveredEvidence.is_primary ? 'success' : 'grey'" variant="flat">
-                      {{ hoveredEvidence.is_primary ? 'Primary Source' : 'Reference' }}
-                    </v-chip>
-                  </div>
-                  
-                  <div class="text-body-2 mb-3 text-white font-italic" style="line-height: 1.6;">
-                    "{{ hoveredEvidence.quote || 'No specific quote available.' }}"
-                  </div>
-
-                  <v-divider class="mb-3 border-opacity-25" />
-
-                  <a :href="hoveredEvidence.url" target="_blank" class="d-flex align-center text-decoration-none text-grey-lighten-1 hover-source">
-                    <v-icon size="small" class="mr-2">mdi-link-variant</v-icon>
-                    <div class="text-caption text-truncate">
-                      <div class="font-weight-bold">{{ hoveredEvidence.title || getDomain(hoveredEvidence.url) }}</div>
-                      <div class="text-grey-darken-1">{{ getDomain(hoveredEvidence.url) }}</div>
-                    </div>
-                    <v-icon size="small" class="ml-auto">mdi-open-in-new</v-icon>
+                <div class="pa-3">
+                  <!-- Header Link -->
+                  <a 
+                    :href="hoveredEvidence.url" 
+                    target="_blank" 
+                    class="d-flex align-center text-decoration-none text-white mb-1 hover-link"
+                  >
+                    <span class="text-body-2 font-weight-bold text-truncate">{{ hoveredEvidence.title || hoveredEvidence.url }}</span>
+                    <v-icon size="x-small" class="ml-1 text-grey-darken-1">mdi-open-in-new</v-icon>
                   </a>
+
+                  <!-- Quote -->
+                  <div class="text-caption font-italic text-grey-lighten-1 bg-grey-darken-3 rounded-lg pa-2 mt-2" style="line-height: 1.4;">
+                     "{{ hoveredEvidence.quote }}"
+                  </div>
                 </div>
               </v-card>
             </div>
+
+
 
             <!-- 参考文献セクション -->
             <div v-if="article.references?.length > 0" class="mt-16 pt-8 border-t" style="border-color: #333 !important;">
@@ -331,6 +325,15 @@ onMounted(() => {
 .sticky-top {
   position: sticky;
   top: 64px;
+}
+
+.hover-link {
+  border-bottom: none !important;
+  color: inherit !important;
+}
+
+.rounded-custom {
+  border-radius: 16px;
 }
 
 .hover-link:hover .text-body-2 {
