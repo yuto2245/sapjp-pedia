@@ -7,16 +7,13 @@
           <v-btn icon="mdi-arrow-left" variant="text" @click="router.back()" color="grey" />
           <div class="text-subtitle-2 text-grey ml-2 text-uppercase">前画面へ</div>
           <v-spacer />
-          <v-btn
-            color="primary"
-            variant="flat"
+          <ThemeButton 
             :loading="loading"
             @click="submit"
             :disabled="!valid"
-            class="text-capitalize px-6"
           >
             公開する
-          </v-btn>
+          </ThemeButton>
         </div>
 
         <v-form ref="form" v-model="valid" @submit.prevent="submit">
@@ -102,6 +99,7 @@ import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { createArticle } from '@/api'
 import { marked } from 'marked'
+import ThemeButton from '@/components/ThemeButton.vue'
 
 const router = useRouter()
 const form = ref(null)
