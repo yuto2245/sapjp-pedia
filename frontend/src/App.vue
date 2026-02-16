@@ -14,38 +14,26 @@
 
         <v-spacer />
 
-        <v-btn
+        <theme-button
           prepend-icon="mdi-plus"
           to="/editor"
-          variant="text"
-          rounded="pill"
-          color="grey"
-          class="text-capitalize mr-3"
         >
           新規記事
-        </v-btn>
+        </theme-button>
 
-        <v-btn
+        <theme-button
           prepend-icon="mdi-shield-account"
           to="/admin"
-          variant="text"
-          rounded="pill"
-          color="grey"
-          class="text-capitalize mr-3"
         >
           管理者
-        </v-btn>
+        </theme-button>
 
-        <v-btn
+        <theme-button
           prepend-icon="mdi-api"
           to="/developer/api"
-          variant="text"
-          rounded="pill"
-          color="grey"
-          class="text-capitalize"
         >
           API
-        </v-btn>
+        </theme-button>
       </v-container>
     </v-app-bar>
 
@@ -71,5 +59,5 @@
 </template>
 
 <script setup>
-//
+import ThemeButton from '@/components/ThemeButton.vue';
 </script>

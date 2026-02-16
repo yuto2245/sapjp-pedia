@@ -40,26 +40,19 @@
                 {{ article.title }}
               </h1>
               <div class="d-flex align-center ml-4" style="flex-shrink: 0;">
-                 <v-btn
-                   variant="text"
-                   rounded="pill"
-                   color="grey"
-                   class="text-capitalize mr-3"
+                 <ThemeButton
+                   class="mr-3"
                    prepend-icon="mdi-history"
                    :to="`/articles/${route.params.id}/history`"
                  >
                    履歴
-                 </v-btn>
-                 <v-btn
-                   variant="text"
-                   rounded="pill"
-                   color="grey"
-                   class="text-capitalize"
+                 </ThemeButton>
+                 <ThemeButton
                    prepend-icon="mdi-pencil"
                    :to="`/articles/${route.params.id}/propose`"
                  >
                    編集
-                 </v-btn>
+                 </ThemeButton>
               </div>
             </div>
 
@@ -81,12 +74,12 @@
               <!-- 証拠ポップアップ -->
               <v-card
                 v-if="hoveredEvidence"
-                class="evidence-popup rounded-custom"
+                class="evidence-popup rounded-custom border"
                 elevation="8"
                 min-width="250"
                 max-width="320"
                 theme="dark"
-                :style="{ top: popupPos.y + 'px', left: popupPos.x + 'px', position: 'absolute', zIndex: 100 }"
+                :style="{ top: popupPos.y + 'px', left: popupPos.x + 'px', position: 'absolute', zIndex: 100, borderColor: '#424242 !important' }"
                 @mouseleave="closePopup"
               >
                 <div class="pa-3">
@@ -101,7 +94,7 @@
                   </a>
 
                   <!-- Quote -->
-                  <div class="text-caption font-italic text-grey-lighten-1 bg-grey-darken-3 rounded-lg pa-2 mt-2" style="line-height: 1.4;">
+                  <div class="text-caption font-italic text-grey-lighten-1 mt-1" style="line-height: 1.4;">
                      "{{ hoveredEvidence.quote }}"
                   </div>
                 </div>
@@ -146,6 +139,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getArticle } from '@/api'
 import { marked } from 'marked'
+import ThemeButton from '@/components/ThemeButton.vue'
 
 const route = useRoute()
 const router = useRouter()
